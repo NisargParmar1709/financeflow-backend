@@ -1,0 +1,129 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .github/workflows/ci.yml — Continuous Integration Pipeline
+#
+# WHY CI (Production Readiness — Video 1):
+#   Without CI, code quality degrades silently:
+#   - Linting errors pile up
+#   - Type errors go unnoticed until runtime
+#   - Tests are skipped "just this once"
+#
+#   With CI, GitHub BLOCKS merging to main if any check fails.
+#   Every single commit is automatically validated.
+#
+# TRIGGERS:
+#   - push to main → runs full CI (your deployments are always tested)
+#   - pull_request to main → runs full CI (catches bugs before merge)
+#
+# STAGES (run in parallel where possible):
+#   1. lint     → ruff (fast, catches style + obvious bugs)
+#   2. typecheck → mypy (catches type errors before runtime)
+#   3. test     → pytest (unit tests, no DB needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ── Linting ──────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.5.4
+
+      - name: Run ruff linter
+        # --output-format=github: annotates PRs with inline lint errors
+        run: ruff check . --output-format=github
+
+      - name: Run ruff formatter check
+        # Fails if code is not formatted — enforces consistent style
+        run: ruff format --check .
+
+  # ── Type Checking ─────────────────────────────────────────────────────────────
+  typecheck:
+    name: Type Check (mypy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run mypy
+        run: mypy app/ --ignore-missing-imports
+
+  # ── Unit Tests ───────────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests (pytest)
+    runs-on: ubuntu-latest
+
+    env:
+      # Minimal env vars needed for unit tests (no real DB or Redis)
+      # Unit tests mock DB and Redis — they don't need real connections
+      APP_ENV: development
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://test:test@localhost/test
+      REDIS_URL: rediss://:test@localhost:6380
+      CLERK_SECRET_KEY: sk_test_dummy
+      CLERK_PUBLISHABLE_KEY: pk_test_dummy
+      CLERK_WEBHOOK_SECRET: whsec_dummy
+      CORS_ORIGINS: http://localhost:5173
+      CLOUDINARY_CLOUD_NAME: test
+      CLOUDINARY_API_KEY: test
+      CLOUDINARY_API_SECRET: test
+      GEMINI_API_KEY: test
+      RESEND_API_KEY: re_test
+      RESEND_FROM_EMAIL: test@test.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip                  # Cache pip downloads — speeds up CI
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/unit/ \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-fail-under=70 \
+            -v
+
+      # Upload coverage report as CI artifact (visible in GitHub Actions UI)
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: htmlcov/

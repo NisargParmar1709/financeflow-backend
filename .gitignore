@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitignore — financeflow-backend
+#
+# Why: Prevents secrets, compiled files, and local dev artifacts from ever
+# reaching GitHub. A single leaked .env can compromise the entire production DB.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Python compiled files ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+# Both common venv folder names — never commit the venv itself
+.venv/
+venv/
+env/
+ENV/
+
+# ── Environment variables (MOST CRITICAL — never commit secrets) ──────────────
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Build / distribution ──────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── IDE / editor files ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ── Alembic: keep migrations, ignore compiled cache ───────────────────────────
+# migrations/ is intentionally NOT ignored — we version-control schema changes
+migrations/__pycache__/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/

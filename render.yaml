@@ -1,0 +1,90 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# render.yaml — Render Deployment Configuration
+#
+# WHY THIS FILE EXISTS:
+#   Without render.yaml, Render requires manual UI configuration for every
+#   setting. render.yaml is "Infrastructure as Code" — your deployment config
+#   lives IN the repo, is version-controlled, and can be reviewed in PRs.
+#
+# HOW IT WORKS:
+#   1. You push to GitHub
+#   2. Render detects render.yaml and deploys accordingly
+#   3. Secret env vars are set in Render dashboard (never in this file)
+#
+# WHAT GOES IN THIS FILE: Non-secret configuration
+# WHAT GOES IN RENDER DASHBOARD: DATABASE_URL, REDIS_URL, CLERK_SECRET_KEY, etc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: financeflow-backend
+    runtime: docker
+
+    # Render builds using the Dockerfile in repo root
+    dockerfilePath: ./Dockerfile
+
+    # Only deploy when main branch is pushed
+    # Feature branches do NOT auto-deploy (prevents accidental prod pushes)
+    branch: main
+    autoDeploy: true
+
+    # Health check — Render waits for this to return 200 before routing traffic.
+    # This enables zero-downtime deploys: new instance must be healthy before
+    # old instance is terminated.
+    healthCheckPath: /api/v1/health
+
+    # ── Non-secret environment variables ─────────────────────────────────────
+    # Secrets (DATABASE_URL, CLERK_SECRET_KEY etc.) are set in Render dashboard
+    # under Environment → Secret Files or Environment Variables.
+    # NEVER put secrets in this file — it's committed to GitHub.
+    envVars:
+      - key: APP_ENV
+        value: production
+
+      - key: DEBUG
+        value: false
+
+      - key: APP_PORT
+        value: 8000
+
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 100
+
+      # ── Secrets — set these in Render Dashboard, NOT here ─────────────────
+      # The sync: false means Render won't create them automatically.
+      # You must set them manually in the dashboard.
+      - key: DATABASE_URL
+        sync: false
+
+      - key: REDIS_URL
+        sync: false
+
+      - key: CLERK_SECRET_KEY
+        sync: false
+
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+
+      - key: CLERK_WEBHOOK_SECRET
+        sync: false
+
+      - key: CORS_ORIGINS
+        sync: false
+
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+
+      - key: CLOUDINARY_API_KEY
+        sync: false
+
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      - key: GEMINI_API_KEY
+        sync: false
+
+      - key: RESEND_API_KEY
+        sync: false
+
+      - key: RESEND_FROM_EMAIL
+        sync: false

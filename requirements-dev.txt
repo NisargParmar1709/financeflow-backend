@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# requirements-dev.txt — Development + Testing dependencies only
+#
+# WHY SEPARATE FROM requirements.txt:
+#   Production Docker image installs ONLY requirements.txt.
+#   Dev tools (pytest, black, ruff) add ~200MB and have no place in prod.
+#   Render deploy → pip install -r requirements.txt (no -r requirements-dev.txt)
+#   Local dev     → pip install -r requirements.txt -r requirements-dev.txt
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.3.2
+pytest-asyncio==0.23.8         # Async test support (our services are async)
+pytest-cov==5.0.0              # Coverage reports
+httpx==0.27.0                  # AsyncClient for endpoint testing (also in prod for clarity)
+
+# ── Code Quality ──────────────────────────────────────────────────────────────
+ruff==0.5.4                    # Linter + formatter (replaces flake8, isort, black)
+                               # Why ruff: 10-100x faster than black/flake8, one tool
+
+# ── Type Checking ─────────────────────────────────────────────────────────────
+mypy==1.11.0                   # Static type checker
+sqlalchemy[mypy]==2.0.31       # SQLAlchemy mypy plugin for ORM type inference
+
+# ── Database (test-specific) ──────────────────────────────────────────────────
+# For integration tests, we spin up a real PostgreSQL (via Docker or Neon test branch)
+# No SQLite — SQLite doesn't support all PostgreSQL features we use (JSONB, UUID, enums)
+aiosqlite==0.20.0              # Only if you ever need an in-memory fallback for unit tests
+
+# ── Debugging ─────────────────────────────────────────────────────────────────
+ipython==8.26.0                # Better REPL for debugging
+rich==13.7.1                   # Pretty terminal output for scripts

@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# requirements.txt — Production dependencies
+#
+# WHY PINNED VERSIONS (not just fastapi>=0.111):
+#   Unpinned deps mean "latest version at install time". A new release of
+#   SQLAlchemy or Pydantic with a breaking change would silently break the
+#   next deploy. Pin everything in production — upgrade deliberately.
+#
+# HOW TO UPGRADE:
+#   pip install pip-tools
+#   pip-compile requirements.in  (if using .in files)
+#   OR manually bump version → test → commit
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Core Framework ────────────────────────────────────────────────────────────
+fastapi==0.111.1
+uvicorn[standard]==0.30.1      # ASGI server — [standard] includes uvloop + httptools
+
+# ── Pydantic (FastAPI's validation engine) ────────────────────────────────────
+# pydantic
+# pydantic-settings       # For BaseSettings (app/config.py)
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.31             # Async ORM
+asyncpg                        # Fastest async PostgreSQL driver
+alembic==1.13.2                # Database migrations
+
+# ── Redis ─────────────────────────────────────────────────────────────────────
+redis==5.0.8                   # redis-py with async support (redis.asyncio)
+
+# ── Authentication ────────────────────────────────────────────────────────────
+clerk-backend-api==1.1.2       # Clerk JWT validation + webhook verification
+
+# ── File Storage ──────────────────────────────────────────────────────────────
+cloudinary==1.40.0             # Cloudinary Python SDK v2
+
+# ── AI ────────────────────────────────────────────────────────────────────────
+google-generativeai==0.7.2     # Google Gemini AI SDK
+
+# ── Email ─────────────────────────────────────────────────────────────────────
+resend==2.3.0                  # Transactional email via Resend API
+
+# ── HTTP Client (for internal service calls) ──────────────────────────────────
+httpx==0.27.0                  # Async HTTP client (also used by FastAPI test client)
+
+# ── Timezone ──────────────────────────────────────────────────────────────────
+pytz==2024.1                   # Timezone handling for IST conversions
+
+# ── Logging & Observability ───────────────────────────────────────────────────
+python-json-logger==2.0.7      # Structured JSON logging for production log aggregators
+
+# ── Security ──────────────────────────────────────────────────────────────────
+# argon2-cffi: Argon2id password hashing (Video 20 — GPU-resistant hashing)
+# Used for any passwords we store directly (e.g., document pin protection)
+argon2-cffi==23.1.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-multipart==0.0.9        # Required for FastAPI file upload (multipart/form-data)
+python-dotenv==1.0.1           # Loads .env file in development
