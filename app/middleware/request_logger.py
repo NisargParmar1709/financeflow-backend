@@ -33,7 +33,6 @@ request.state.clerk_user_id. If RequestLogger ran before AuthGuard,
 user_id would always be None.
 """
 
-import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
 

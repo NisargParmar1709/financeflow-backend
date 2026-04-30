@@ -1,7 +1,8 @@
 """
-app/routers/__init__.py — re-exports all routers for clean imports in main.py
+app/routers/__init__.py
+
+NOTE: Do NOT re-export routers here- main.py imports each router module
+ddorectly (e.g `from app.routers import auth`). Putting re-exports here 
+causes a circular import because this __init__.py is part of the same
+package being initialised.
 """
-from app.routers import (
-    auth, expenses, incomes, accounts, budgets,
-    groups, dues, analytics, ai, documents, notifications,
-)

@@ -21,7 +21,7 @@ FAIL-FAST PRINCIPLE (from Video 17):
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator, AnyUrl
+from pydantic import field_validator
 from typing import Literal
 from functools import lru_cache
 

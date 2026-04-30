@@ -43,11 +43,23 @@ from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import IntegrityError, OperationalError
-from pydantic import ValidationError
 
 from app.config import settings
+from app.utils.exceptions import FinanceFlowException
 
 logger = logging.getLogger(__name__)
+
+
+# ── Helper: extract trace_id safely ───────────────────────────────────────────
+
+def _trace_id(request: Request) -> str:
+    """
+    Reads trace_id from request.state (set by RequestLoggingMiddleware).
+    Falls back to 'no-trace' if middleware hasn't run yet (e.g. startup errors).
+    Including trace_id in EVERY error log means you can grep one ID and find
+    the full request → auth → error chain in one shot.
+    """
+    return getattr(request.state, "trace_id", "no-trace")
 
 
 # ── Standard Error Response Builder ───────────────────────────────────────────
@@ -67,7 +79,7 @@ def error_response(
         message: Human-readable message (can be shown to users)
         details: Optional extra data (e.g., validation field errors)
     """
-    body = {
+    body: dict = {
         "error": True,
         "code": code,
         "message": message,
@@ -80,14 +92,60 @@ def error_response(
 
 # ── Exception Handlers ─────────────────────────────────────────────────────────
 
+async def financeflow_exception_handler(
+    request: Request, exc: FinanceFlowException
+) -> JSONResponse:
+    """
+    Handles all our custom FinanceFlowException subclasses.
+
+    WHY THIS HANDLER IS FIRST:
+      All business exceptions (BudgetExceededException, ResourceNotFoundException,
+      etc.) inherit from FinanceFlowException. Registering this handler means they
+      are caught BEFORE the generic Exception handler, producing clean 400/403/404
+      responses instead of 500s.
+
+    Log level by status:
+      4xx → warning (client error, expected occasionally)
+      5xx → error   (server problem, needs investigation)
+    """
+    trace_id = _trace_id(request)
+    log_fn = logger.error if exc.status_code >= 500 else logger.warning
+    log_fn(
+        f"FinanceFlowException: [{exc.code}] {exc.message}",
+        extra={
+            "event": "app_exception",
+            "trace_id": trace_id,
+            "error_code": exc.code,
+            "status_code": exc.status_code,
+            "details": exc.details,
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
+    return error_response(
+        status_code=exc.status_code,
+        code=exc.code,
+        message=exc.message,
+        details=exc.details or None,
+    )
+
+
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """
     Handles HTTPExceptions raised explicitly in routers/services.
     Examples: raise HTTPException(status_code=404, detail="Expense not found")
     """
+    trace_id = _trace_id(request)
     logger.warning(
-        f"HTTPException: {exc.status_code} {exc.detail} | "
-        f"path={request.url.path} method={request.method}"
+        f"HTTPException {exc.status_code}",
+        extra={
+            "event": "http_exception",
+            "trace_id": trace_id,
+            "status_code": exc.status_code,
+            "detail": exc.detail,
+            "path": request.url.path,
+            "method": request.method,
+        },
     )
     return error_response(
         status_code=exc.status_code,
@@ -102,27 +160,31 @@ async def validation_exception_handler(
     """
     Handles Pydantic validation errors from request body/query params.
 
-    FastAPI raises RequestValidationError when incoming data doesn't match
-    the Pydantic schema. Example: required field missing, wrong type.
-
-    We format the errors into a clean list so the frontend can highlight
+    Formats errors into a clean list so the frontend can highlight
     the specific fields that failed.
 
     VALIDATION CONCEPT (Video 9):
       This is the "syntactic validation" layer — Pydantic checks types,
       required fields, and field constraints before the code even runs.
     """
-    # Transform Pydantic's internal error format into something usable
-    field_errors = []
-    for error in exc.errors():
-        field_errors.append({
+    field_errors = [
+        {
             "field": " → ".join(str(loc) for loc in error["loc"]),
             "message": error["msg"],
             "type": error["type"],
-        })
+        }
+        for error in exc.errors()
+    ]
 
+    trace_id = _trace_id(request)
     logger.warning(
-        f"Validation error on {request.url.path}: {field_errors}"
+        "Request validation failed",
+        extra={
+            "event": "validation_error",
+            "trace_id": trace_id,
+            "path": request.url.path,
+            "field_errors": field_errors,
+        },
     )
 
     return error_response(
@@ -139,24 +201,23 @@ async def integrity_error_handler(
     """
     Handles database constraint violations.
 
-    Examples of when this fires:
-      - INSERT with a duplicate email (UNIQUE constraint)
-      - INSERT with a foreign key that doesn't exist
-      - DELETE of a record that has children (FK constraint)
-
-    WHY WE CATCH THIS SPECIFICALLY:
-      Without this handler, a duplicate email error becomes a 500 Internal
-      Server Error. With it, we can return a meaningful 409 Conflict.
-
-    SECURITY: We log the full DB error internally but only return a generic
-    message to the client — DB error messages can expose schema details.
+    WHY 409 not 500: The server processed the request correctly — it's the
+    data itself that violates a constraint (duplicate email, missing FK).
+    SECURITY: Log the full DB error internally; return a generic message
+    to the client — DB errors can reveal schema details to attackers.
     """
+    trace_id = _trace_id(request)
     logger.error(
-        f"DB IntegrityError on {request.url.path}: {exc.orig}",
+        "DB IntegrityError",
+        extra={
+            "event": "db_integrity_error",
+            "trace_id": trace_id,
+            "path": request.url.path,
+            "orig": str(exc.orig),
+        },
         exc_info=True,
     )
 
-    # Check for specific constraint patterns to give better messages
     orig_str = str(exc.orig).lower()
     if "unique" in orig_str:
         message = "A record with this value already exists"
@@ -180,12 +241,17 @@ async def operational_error_handler(
 ) -> JSONResponse:
     """
     Handles database connection/operational failures.
-    Example: DB server is unreachable, connection pool exhausted.
-
-    This is a 503 Service Unavailable — the server is up but DB is not.
+    Example: DB server unreachable, connection pool exhausted.
     """
+    trace_id = _trace_id(request)
     logger.critical(
-        f"DB OperationalError — database may be unreachable: {exc}",
+        "DB OperationalError — database may be unreachable",
+        extra={
+            "event": "db_operational_error",
+            "trace_id": trace_id,
+            "path": request.url.path,
+            "error": str(exc),
+        },
         exc_info=True,
     )
     return error_response(
@@ -201,23 +267,23 @@ async def unhandled_exception_handler(
     """
     The final safety net — catches EVERYTHING that fell through.
 
-    This is the last middleware in the error handling chain.
-    Any exception not caught above lands here.
-
-    PRODUCTION vs DEVELOPMENT behavior:
-      - Development: return the actual error message (helps debugging)
-      - Production: return generic "unexpected error" (prevents info leakage)
-
     Always logs the full traceback server-side.
+    PRODUCTION: returns a generic message (prevents info leakage).
+    DEVELOPMENT: includes the actual error message for easier debugging.
     """
-    # Full traceback to server logs — never sent to client
+    trace_id = _trace_id(request)
     logger.critical(
-        f"Unhandled exception on {request.url.path}: {exc}\n"
-        f"{traceback.format_exc()}"
+        f"Unhandled exception: {type(exc).__name__}: {exc}",
+        extra={
+            "event": "unhandled_exception",
+            "trace_id": trace_id,
+            "path": request.url.path,
+            "method": request.method,
+            "exception_type": type(exc).__name__,
+            "traceback": traceback.format_exc(),
+        },
     )
 
-    # In development: reveal the error message for easier debugging
-    # In production: hide it — attackers read 500 error messages
     message = str(exc) if settings.is_development else "An unexpected error occurred"
 
     return error_response(
@@ -232,16 +298,21 @@ async def unhandled_exception_handler(
 def register_exception_handlers(app: FastAPI) -> None:
     """
     Registers all exception handlers with the FastAPI app.
-
     Called from app/main.py during app creation.
-    Ordering matters: more specific handlers are registered first.
-    FastAPI matches the most specific exception type first.
+
+    ORDER MATTERS — FastAPI matches the most specific type first:
+      1. FinanceFlowException → our custom business exceptions (most specific)
+      2. HTTPException        → FastAPI's built-in HTTP errors
+      3. RequestValidationError → Pydantic schema validation failures
+      4. IntegrityError       → DB unique/FK constraint violations
+      5. OperationalError     → DB connection failures
+      6. Exception            → catch-all safety net (least specific, last)
     """
+    app.add_exception_handler(FinanceFlowException, financeflow_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(IntegrityError, integrity_error_handler)
     app.add_exception_handler(OperationalError, operational_error_handler)
-    # Catch-all — must be last
     app.add_exception_handler(Exception, unhandled_exception_handler)
 
 

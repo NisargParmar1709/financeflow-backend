@@ -132,15 +132,45 @@ class AuthGuardMiddleware(BaseHTTPMiddleware):
             # request. Services that need it will fetch it themselves with the
             # clerk_user_id. This keeps middleware fast and focused.
 
-            logger.debug(f"Auth OK: {request.state.clerk_user_id} → {request.url.path}")
+            # trace_id is set by RequestLoggingMiddleware (runs before us).
+            # Include it so every auth log line is searchable by trace_id.
+            trace_id = getattr(request.state, "trace_id", "no-trace")
+            logger.info(
+                "Auth OK",
+                extra={
+                    "event": "auth_success",
+                    "trace_id": trace_id,
+                    "clerk_user_id": request.state.clerk_user_id,
+                    "path": request.url.path,
+                    "method": request.method,
+                },
+            )
 
         except ClerkErrors as e:
             # Clerk SDK raises ClerkErrors for invalid/expired tokens
-            logger.warning(f"JWT validation failed: {e}")
+            trace_id = getattr(request.state, "trace_id", "no-trace")
+            logger.warning(
+                "JWT validation failed",
+                extra={
+                    "event": "auth_failure",
+                    "trace_id": trace_id,
+                    "reason": str(e),
+                    "path": request.url.path,
+                },
+            )
             return self._unauthorized("Invalid token")
         except Exception as e:
             # Unexpected errors (network timeout fetching JWKS, etc.)
-            logger.error(f"Auth middleware unexpected error: {e}")
+            trace_id = getattr(request.state, "trace_id", "no-trace")
+            logger.error(
+                "Auth middleware unexpected error",
+                extra={
+                    "event": "auth_error",
+                    "trace_id": trace_id,
+                    "error": str(e),
+                    "path": request.url.path,
+                },
+            )
             return self._unauthorized("Authentication failed")
 
         # ── Step 5: Pass to next middleware/router ────────────────────────────
@@ -192,9 +222,6 @@ class AuthGuardMiddleware(BaseHTTPMiddleware):
 # ── Standalone dependency for individual route protection ──────────────────────
 # Some routes need to access the current user inside the route handler.
 # Use this as a FastAPI dependency to get the clerk_user_id cleanly.
-
-from fastapi import Depends
-
 
 async def get_current_user_id(request: Request) -> str:
     """

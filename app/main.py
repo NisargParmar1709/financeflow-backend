@@ -31,7 +31,6 @@ MIDDLEWARE ORDER (requests flow top-to-bottom, responses bottom-to-top):
   Response travels back through in reverse order.
 """
 
-import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,19 +47,19 @@ from app.utils.logging import setup_logging, get_logger
 # Each router file is one resource. Import them all here.
 # We import them even if they're empty stubs — ensures the module loads
 # correctly and catches import errors at startup, not at first request.
-from app.routers import (
-    auth,
-    expenses,
-    incomes,
-    accounts,
-    budgets,
-    groups,
-    dues,
-    analytics,
-    ai,
-    documents,
-    notifications,
-)
+# from app.routers import (
+#     auth,
+#     expenses,
+#     incomes,
+#     accounts,
+#     budgets,
+#     groups,
+#     dues,
+#     analytics,
+#     ai,
+#     documents,
+#     notifications,
+# )
 
 # ── Logging Setup ─────────────────────────────────────────────────────────────
 # Called ONCE here — configures root logger for the entire app.
@@ -126,27 +125,42 @@ register_exception_handlers(app)
 
 
 # ── Middleware Registration ────────────────────────────────────────────────────
-# FastAPI/Starlette processes middleware in REVERSE registration order.
+# Starlette processes middleware in REVERSE registration order.
 # Last registered = outermost = first to see the request.
 #
-# We want: CORS → Auth → RateLimit → Router
-# So we register: RateLimit first, then Auth, then CORS last.
-
-app.add_middleware(RequestLoggingMiddleware)
+# REQUIRED EXECUTION ORDER (request flows top → bottom):
+#   1. CORSMiddleware        → handle preflight OPTIONS before anything else
+#   2. RequestLoggingMiddleware → generate trace_id FIRST so every subsequent
+#                                 middleware and service can include it in logs
+#   3. AuthGuardMiddleware   → validate JWT, inject clerk_user_id into state
+#   4. RateLimiterMiddleware → check request count (uses clerk_user_id if available)
+#   5. Router handlers       → actual route logic
+#
+# WHY RequestLogger must be #2 (right after CORS):
+#   trace_id is generated here. Auth, RateLimiter, and all services read
+#   request.state.trace_id for structured logging. If RequestLogger ran
+#   AFTER Auth, auth logs would have no trace_id — breaking the trace chain.
+#
+# Registration order is REVERSED from execution order:
+#   Register RateLimiter first   → runs last (innermost)
+#   Register Auth second         → runs second-to-last
+#   Register RequestLogger third → runs second (right after CORS)
+#   Register CORS last           → runs first (outermost)
 
 app.add_middleware(RateLimiterMiddleware)
 
 app.add_middleware(AuthGuardMiddleware)
 
+app.add_middleware(RequestLoggingMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    # Why specific origins instead of "*":
-    # "*" with credentials=True is invalid (browsers reject it).
-    # We whitelist only our Vercel domain in production.
+    # "*" with credentials=True is rejected by browsers. We explicitly
+    # whitelist our Vercel frontend domain only.
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,   # Needed for Clerk session cookies
+    allow_credentials=True,   # Required for Clerk session cookies
     allow_methods=["*"],      # GET, POST, PUT, PATCH, DELETE, OPTIONS
-    allow_headers=["*"],      # Authorization, Content-Type, etc.
+    allow_headers=["*"],      # Authorization, Content-Type, X-Trace-ID, etc.
 )
 
 
@@ -157,17 +171,17 @@ app.add_middleware(
 
 API_V1 = "/api/v1"
 
-app.include_router(auth.router,          prefix=API_V1, tags=["Auth"])
-app.include_router(expenses.router,      prefix=API_V1, tags=["Expenses"])
-app.include_router(incomes.router,       prefix=API_V1, tags=["Income"])
-app.include_router(accounts.router,      prefix=API_V1, tags=["Bank Accounts"])
-app.include_router(budgets.router,       prefix=API_V1, tags=["Budgets"])
-app.include_router(groups.router,        prefix=API_V1, tags=["Groups"])
-app.include_router(dues.router,          prefix=API_V1, tags=["Dues"])
-app.include_router(analytics.router,     prefix=API_V1, tags=["Analytics"])
-app.include_router(ai.router,            prefix=API_V1, tags=["AI"])
-app.include_router(documents.router,     prefix=API_V1, tags=["Documents"])
-app.include_router(notifications.router, prefix=API_V1, tags=["Notifications"])
+# app.include_router(auth.router,          prefix=API_V1, tags=["Auth"])
+# app.include_router(expenses.router,      prefix=API_V1, tags=["Expenses"])
+# app.include_router(incomes.router,       prefix=API_V1, tags=["Income"])
+# app.include_router(accounts.router,      prefix=API_V1, tags=["Bank Accounts"])
+# app.include_router(budgets.router,       prefix=API_V1, tags=["Budgets"])
+# app.include_router(groups.router,        prefix=API_V1, tags=["Groups"])
+# app.include_router(dues.router,          prefix=API_V1, tags=["Dues"])
+# app.include_router(analytics.router,     prefix=API_V1, tags=["Analytics"])
+# app.include_router(ai.router,            prefix=API_V1, tags=["AI"])
+# app.include_router(documents.router,     prefix=API_V1, tags=["Documents"])
+# app.include_router(notifications.router, prefix=API_V1, tags=["Notifications"])
 
 
 # ── Health Check ───────────────────────────────────────────────────────────────

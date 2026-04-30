@@ -31,7 +31,7 @@ FIXED DEPOSIT AUTO-CALCULATION:
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 from sqlalchemy import (
@@ -45,10 +45,8 @@ from app.models.base import Base, TimestampMixin
 from app.models.enums import AccountType, AccountService, FDStatus
 
 if TYPE_CHECKING:
-    from app.models.user import User
     from app.models.document import Document
     from app.models.statement import StatementEntry
-    from app.models.income import Income
 
 
 class Branch(TimestampMixin, Base):
