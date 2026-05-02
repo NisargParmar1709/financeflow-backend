@@ -1,6 +1,8 @@
 # FinanceFlow Backend — Open Tasks
 
-## Stage 3: Services (Next)
+## Stage 3: Services ✅ COMPLETE
+
+## Stage 4: Routers (Next)
 
 - [ ] `app/services/category_service.py`
 - [ ] `app/services/expense_service.py` — budget check, cache invalidation

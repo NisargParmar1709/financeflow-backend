@@ -46,7 +46,22 @@ All 18 tables defined as SQLAlchemy ORM models:
 - `app/models/document.py` — Document, StatementEntry
 - `app/models/notification.py` — Notification, AIInsight, AIChatSession
 
-### Stage 2 — Schemas (Complete)
+### Stage 3 — Services (Complete)
+All 11 service files built. Every function uses `log_event()` with `trace_id`.
+
+- `app/services/auth_service.py` — Clerk webhook handler (created/updated/deleted), user profile update, onboarding. Idempotent webhook handling.
+- `app/services/category_service.py` — list (system + user), create with duplicate check, update, soft-delete. 7-day Redis cache.
+- `app/services/expense_service.py` — create with full budget check (hard block + soft alert), list with filters + sum, update (re-runs budget check if amount/category changed), delete + Cloudinary cleanup, monthly summary (10-min cache).
+- `app/services/income_service.py` — full CRUD + monthly summary by source (cached).
+- `app/services/budget_service.py` — create with uniqueness enforcement, list with real-time SAFE/WARNING/EXCEEDED status computed live from expense SUM, update, soft-delete.
+- `app/services/due_service.py` — full CRUD, settle, net position summary (30-min cache).
+- `app/services/account_service.py` — accounts (create/list/detail/update/soft-delete), balance update, services (add/update), FDs (create with maturity calculation, update status), statement entries.
+- `app/services/group_service.py` — group CRUD, add member, create group expense with EQUAL/PERCENTAGE/EXACT split validation, settle split (auto-marks group expense settled if all splits done), net balances per member.
+- `app/services/notification_service.py` — list, mark read, mark all read, check_all_alerts (budget + FD maturity + min balance), all idempotent with 24hr duplicate check.
+- `app/services/analytics_service.py` — dashboard KPIs (1hr cache), spending by category (1hr), monthly trend (24hr), daily pattern (24hr), payment mode split (1hr), yearly summary (24hr), net worth (30min), income source breakdown (1hr).
+- `app/services/ai_service.py` — cache-first insight generation via Gemini, multi-turn chat with session history, session management.
+- `app/dependencies.py` — `get_current_user` FastAPI dependency (reads `clerk_user_id` from `request.state`, fetches User from DB). `get_current_user_optional` for public routes.
+- `app/cache/keys.py` — added `user_categories` key.
 All Pydantic request/response schemas built and validated:
 - `app/schemas/common.py` — `SuccessResponse[T]`, `PaginationMeta`, helpers
 - `app/schemas/user_schema.py` — Clerk webhook, UserResponse, UserUpdate

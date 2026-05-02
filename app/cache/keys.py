@@ -27,17 +27,17 @@ TTL CONSTANTS (defined here, not hardcoded in service files):
 # ── TTL Constants (seconds) ────────────────────────────────────────────────────
 
 # Expense/income lists change frequently — user adds/edits often
-TTL_LIST = 60           # 1 minute
+TTL_LIST = 60  # 1 minute
 
 # Analytics are expensive to compute (multiple aggregations) but acceptable
 # to be 5 minutes stale — user won't notice slight delay in charts
-TTL_ANALYTICS = 300     # 5 minutes
+TTL_ANALYTICS = 300  # 5 minutes
 
 # User profile changes rarely (name, avatar, preferences)
 TTL_USER_PROFILE = 3600  # 1 hour
 
 # Budget overview changes on every transaction — keep fresh
-TTL_BUDGET = 120        # 2 minutes
+TTL_BUDGET = 120  # 2 minutes
 
 # Monthly summaries rarely change mid-day
 TTL_MONTHLY_SUMMARY = 600  # 10 minutes
@@ -46,6 +46,7 @@ TTL_MONTHLY_SUMMARY = 600  # 10 minutes
 # ── Key Builders ────────────────────────────────────────────────────────────────
 # All functions return strings. Use these in services, NEVER construct
 # keys manually with f-strings in service/router files.
+
 
 class CacheKeys:
     """
@@ -145,6 +146,13 @@ class CacheKeys:
     def dues_summary(user_id: str) -> str:
         """Net position: total I owe vs total they owe."""
         return f"financeflow:dues:{user_id}:summary"
+
+    # ── Categories ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def user_categories(user_id: str) -> str:
+        """All categories visible to a user (system + custom). TTL: 7 days."""
+        return f"financeflow:categories:{user_id}:list"
 
     # ── Rate Limiter ──────────────────────────────────────────────────────────
 
