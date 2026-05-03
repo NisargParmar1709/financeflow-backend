@@ -1,122 +1,228 @@
 """
-app/schemas/budget_schema.py — Budget Request & Response Schemas
+app/schemas/analytics_schema.py — Analytics Response Shapes
 
-COVERS (Doc2 — Section 3.4):
-  GET  /budgets              → list[BudgetWithStatus]
-  POST /budgets              → BudgetCreate → BudgetWithStatus
-  GET  /budgets/{id}         → BudgetWithStatus
-  PATCH /budgets/{id}        → BudgetUpdate → BudgetWithStatus
-  DELETE /budgets/{id}       → deleted_response() (soft-delete)
-  GET  /budgets/status       → list[BudgetWithStatus] (all active + current spend)
-  GET  /budgets/alerts       → list[BudgetWithStatus] (only those at/over threshold)
+COVERS (Doc2 — Section 3.10):
+  GET /analytics/dashboard          → DashboardKPI
+  GET /analytics/spending-by-category → list[CategorySpendRow]
+  GET /analytics/monthly-trend      → list[MonthlyTrend]
+  GET /analytics/daily-pattern      → list[DailyPattern]
+  GET /analytics/payment-mode-split → list[PaymentModeSplit]
+  GET /analytics/yearly             → YearlySummary
+  GET /analytics/accounts           → list[AccountAnalytics]
+  GET /analytics/income-sources     → list[IncomeSourceRow]
+  GET /analytics/net-worth          → NetWorth
 
-BUDGET STATUS LOGIC (Doc2 — Section 4.1 & Doc4 — Section 10.1):
-  The service layer computes spent_so_far by SUMming current-period expenses.
-  Status is one of:
-    SAFE      → spent_pct < alert_threshold_percent
-    WARNING   → spent_pct >= alert_threshold_percent (but not exceeded)
-    EXCEEDED  → spent > limit
+ALL ANALYTICS ENDPOINTS ARE READ-ONLY — no Create/Update schemas needed.
+All are cached in Redis. Cache TTLs are documented in each service function.
 
-  BudgetWithStatus is the rich response that includes this real-time data.
-  It is NOT cached — budget checks must always be real-time.
+Why these are pure response schemas (no request body):
+  Analytics are derived from the user's own data.
+  The only inputs are time-range parameters in the URL query string.
+  See AnalyticsPeriodFilter below for the shared query param schema.
 """
 
 from __future__ import annotations
 
-import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import BudgetPeriod
-from app.schemas.category_schema import CategoryBrief
+from app.models.enums import PaymentMode
+
+# ── Shared Query Params ────────────────────────────────────────────────────────
 
 
-# ── Request Schemas ────────────────────────────────────────────────────────────
-
-class BudgetCreate(BaseModel):
+class AnalyticsPeriodFilter(BaseModel):
     """
-    POST /budgets — create a new spending budget.
-
-    Uniqueness rule (enforced in service, not here):
-      Only one ACTIVE budget per user per category per period.
-      Creating a second MONTHLY Food budget raises DuplicateResourceException.
+    Shared query parameters for analytics endpoints that take a period.
+    Used by the router's Depends() injection.
     """
 
-    category_id: uuid.UUID
-    subcategory_id: uuid.UUID | None = None  # If set: subcategory-level budget
-    limit_amount: Decimal = Field(..., gt=0, description="Budget limit in INR")
-    period: BudgetPeriod = BudgetPeriod.MONTHLY
-
-    # Alert when spending reaches this % of limit (default 80%)
-    alert_threshold_percent: int = Field(80, ge=10, le=99)
-
-    # Optional date range for the budget (None = indefinite)
-    start_date: date | None = None
-    end_date: date | None = None
+    month: int = Field(..., ge=1, le=12, description="Month number 1-12")
+    year: int = Field(..., ge=2020, le=2100, description="4-digit year")
 
 
-class BudgetUpdate(BaseModel):
-    """
-    PATCH /budgets/{id} — partial update.
+class AnalyticsDateRangeFilter(BaseModel):
+    """For endpoints that take a flexible date range instead of month/year."""
 
-    Common update: change limit_amount (₹2000 → ₹3000) or alert threshold.
-    Deactivation: set is_active=False (soft-delete).
-    """
-
-    limit_amount: Decimal | None = Field(None, gt=0)
-    alert_threshold_percent: int | None = Field(None, ge=10, le=99)
-    is_active: bool | None = None
-    end_date: date | None = None
+    from_date: date
+    to_date: date
 
 
-# ── Response Schemas ───────────────────────────────────────────────────────────
+# ── Dashboard ──────────────────────────────────────────────────────────────────
 
-class BudgetResponse(BaseModel):
-    """Raw budget row — no computed spend data."""
 
-    model_config = {"from_attributes": True}
+class BudgetAlertItem(BaseModel):
+    """One budget alert shown on the dashboard."""
 
-    id: uuid.UUID
-    user_id: uuid.UUID
-    category_id: uuid.UUID
-    subcategory_id: uuid.UUID | None
+    budget_id: str
+    category_name: str
+    category_icon: str | None
     limit_amount: Decimal
-    period: BudgetPeriod
-    alert_threshold_percent: int
-    is_active: bool
-    start_date: date | None
-    end_date: date | None
-    created_at: datetime
-    updated_at: datetime
+    spent_so_far: Decimal
+    spent_pct: float
+    status: str  # "WARNING" | "EXCEEDED"
 
 
-class BudgetWithStatus(BaseModel):
+class DashboardDueSummary(BaseModel):
+    """Compact due summary embedded in DashboardKPI."""
+
+    i_owe: Decimal
+    they_owe: Decimal
+
+
+class DashboardKPI(BaseModel):
     """
-    Budget + real-time spending data.
+    GET /analytics/dashboard — primary dashboard data.
 
-    The service computes spent_so_far, remaining, spent_pct, and status
-    by querying the expenses table for the current period.
-    This is the primary budget response shape — richer than BudgetResponse.
+    Cached 1 hour. Invalidated when any expense or income changes.
+    All monetary values in INR (Decimal for precision).
     """
 
-    # Budget fields
-    id: uuid.UUID
-    category: CategoryBrief
-    subcategory_id: uuid.UUID | None
-    limit_amount: Decimal
-    period: BudgetPeriod
-    alert_threshold_percent: int
-    is_active: bool
-    start_date: date | None
-    end_date: date | None
+    year: int
+    month: int
 
-    # Real-time computed fields (set by service)
-    spent_so_far: Decimal = Decimal("0.00")
-    remaining: Decimal = Decimal("0.00")
-    spent_pct: float = 0.0
-    status: str = "SAFE"  # "SAFE" | "WARNING" | "EXCEEDED"
+    # Core KPIs
+    income_total: Decimal
+    expense_total: Decimal
+    net_savings: Decimal
+    savings_rate_pct: float  # (net_savings / income_total) * 100
 
-    created_at: datetime
-    updated_at: datetime
+    # vs last month (% change, can be negative)
+    income_vs_last_month_pct: float
+    expense_vs_last_month_pct: float
+
+    # Highlights
+    top_category_name: str | None
+    top_category_amount: Decimal | None
+
+    # Active budget alerts (at or over threshold)
+    budget_alerts: list[BudgetAlertItem] = []
+
+    # Compact due summary
+    due_summary: DashboardDueSummary
+
+
+# ── Spending by Category ───────────────────────────────────────────────────────
+
+
+class CategorySpendRow(BaseModel):
+    """One row in the spending-by-category breakdown (pie chart data)."""
+
+    category_id: str
+    category_name: str
+    icon: str | None
+    color: str | None
+    total_amount: Decimal
+    transaction_count: int
+    pct_of_total: float
+
+
+# ── Monthly Trend (12-month bar chart) ────────────────────────────────────────
+
+
+class MonthlyTrend(BaseModel):
+    """
+    One month in the income vs expense trend chart.
+    Returns 12 rows for a full year.
+    """
+
+    month_number: int  # 1-12
+    month_name: str  # "Jan", "Feb", ...
+    income: Decimal
+    expense: Decimal
+    net_savings: Decimal
+
+
+# ── Daily Pattern (day-of-week averages) ──────────────────────────────────────
+
+
+class DailyPattern(BaseModel):
+    """Average spending per day-of-week for a given month."""
+
+    day: int  # 1 = Monday, 7 = Sunday
+    day_name: str  # "Monday", "Tuesday", ...
+    total: Decimal
+    avg: Decimal
+
+
+# ── Payment Mode Split (pie chart) ────────────────────────────────────────────
+
+
+class PaymentModeSplit(BaseModel):
+    """How spending is split across payment methods."""
+
+    payment_mode: PaymentMode
+    total_amount: Decimal
+    pct_of_total: float
+
+
+# ── Yearly Summary ─────────────────────────────────────────────────────────────
+
+
+class MonthlyBreakdownRow(BaseModel):
+    """One month row inside YearlySummary."""
+
+    month: int
+    month_name: str
+    income: Decimal
+    expense: Decimal
+    savings: Decimal
+    savings_rate_pct: float
+
+
+class YearlySummary(BaseModel):
+    """GET /analytics/yearly — full year overview."""
+
+    year: int
+    annual_income: Decimal
+    annual_expense: Decimal
+    annual_savings: Decimal
+    avg_monthly_expense: Decimal
+    monthly_breakdown: list[MonthlyBreakdownRow]
+    top_categories: list[CategorySpendRow]
+
+
+# ── Account Analytics ──────────────────────────────────────────────────────────
+
+
+class AccountAnalytics(BaseModel):
+    """Per-account analytics summary for the year."""
+
+    account_id: str
+    bank_name: str
+    account_last4: str
+    current_balance: Decimal
+    fd_total: Decimal
+    total_debited_ytd: Decimal
+    total_credited_ytd: Decimal
+
+
+# ── Income Source Breakdown ────────────────────────────────────────────────────
+
+
+class IncomeSourceRow(BaseModel):
+    """One source in the income breakdown."""
+
+    source: str  # IncomeSource enum value
+    total_amount: Decimal
+    pct_of_total: float
+
+
+# ── Net Worth ──────────────────────────────────────────────────────────────────
+
+
+class NetWorth(BaseModel):
+    """
+    GET /analytics/net-worth — snapshot of financial position.
+
+    Net worth = account_balances_total + fd_total - dues_payable
+    Cached 30 minutes.
+    """
+
+    account_balances_total: Decimal
+    fd_total: Decimal
+    dues_receivable: Decimal  # They owe you
+    dues_payable: Decimal  # You owe them
+    net_worth: Decimal

@@ -1,0 +1,63 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+addopts = "--tb=short -q"
+norecursedirs = ["migrations", ".venv", "__pycache__", "node_modules"]
+
+[tool.coverage.run]
+source = ["app"]
+# Exclude files that require real DB/Redis/external APIs.
+# These are covered by integration tests, not unit tests.
+omit = [
+    "app/services/account_service.py",
+    "app/services/ai_service.py",
+    "app/services/analytics_service.py",
+    "app/services/auth_service.py",
+    "app/services/category_service.py",
+    "app/services/due_service.py",
+    "app/services/expense_service.py",
+    "app/services/group_service.py",
+    "app/services/income_service.py",
+    "app/services/notification_service.py",
+    "app/workers/tasks.py",
+    "app/middleware/auth_guard.py",
+    "app/middleware/rate_limiter.py",
+    "app/middleware/request_logger.py",
+    "app/cache/redis_client.py",
+    "app/database/*",
+    "app/dependencies.py",
+    "app/main.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
+
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [
+    ".venv", ".cache", "__pycache__", "node_modules",
+    "migrations", ".git", "build", "dist",
+]
+
+[tool.ruff.lint]
+# E = pycodestyle errors, F = pyflakes, I = isort, UP = pyupgrade
+select = ["E", "F", "I", "UP"]
+# Ignore line-too-long in SQL strings and comments
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use assert statements and wildcard imports freely
+"tests/*" = ["F401", "F811"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+# SQLAlchemy ORM models use dynamic attributes — tell mypy to ignore them
+plugins = ["sqlalchemy.ext.mypy.plugin"]

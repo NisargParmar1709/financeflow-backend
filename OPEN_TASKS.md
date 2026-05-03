@@ -1,6 +1,6 @@
 # FinanceFlow Backend — Open Tasks
 
-## Stage 3: Services ✅ COMPLETE
+## CI/CD + Workers + Tests ✅ COMPLETE
 
 ## Stage 4: Routers (Next)
 

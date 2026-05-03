@@ -20,10 +20,11 @@ FAIL-FAST PRINCIPLE (from Video 17):
   infinitely worse than one discovered at deploy time by you.
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
-from typing import Literal
 from functools import lru_cache
+from typing import Literal
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -118,7 +119,7 @@ class Settings(BaseSettings):
         return self.APP_ENV == "development"
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """
     Returns a cached singleton Settings instance.
@@ -130,7 +131,7 @@ def get_settings() -> Settings:
     In tests: call get_settings.cache_clear() to reset between test cases
     that need different env vars.
     """
-    return Settings()
+    return Settings()  # type: ignore[call-arg]  # values come from env vars at runtime
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────

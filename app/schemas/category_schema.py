@@ -11,7 +11,7 @@ DESIGN NOTES:
   - System categories (user_id IS NULL) are visible to all users.
     They are NOT returned with user_id — the frontend doesn't need
     to know if a category is system or user-created for most operations.
-  - icon is an emoji string (🍛). No enum — too many possible icons.
+  - icon is an emoji string. No enum — too many possible icons.
   - color is a 7-char hex string (#F04438). Validated by a field_validator.
   - CategoryBrief is a lightweight nested object embedded inside
     ExpenseResponse — it avoids deep joins by returning just id/name/icon/color.
@@ -24,8 +24,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ── Subcategory ────────────────────────────────────────────────────────────────
+
 
 class SubcategoryCreate(BaseModel):
     """POST /categories/{id}/subcategories"""
@@ -68,6 +68,7 @@ class SubcategoryBrief(BaseModel):
 
 
 # ── Category ───────────────────────────────────────────────────────────────────
+
 
 class CategoryCreate(BaseModel):
     """POST /categories — create a user-owned custom category."""
@@ -142,15 +143,10 @@ class CategoryResponse(BaseModel):
     color: str | None
     description: str | None
     is_active: bool
-    is_system: bool  # True for built-in categories that can't be deleted
+    is_system: bool  # True for built-in categories that can't be deleted (user_id IS NULL)
 
-    # Subcategories are only included on detail endpoints, not list
+    # Subcategories only included on detail endpoints, not list
     subcategories: list[SubcategoryResponse] = []
 
     created_at: datetime
     updated_at: datetime
-
-    @property
-    def is_system(self) -> bool:  # type: ignore[override]
-        """System categories have no user_id."""
-        return self.user_id is None

@@ -226,7 +226,7 @@ class FDUpdate(BaseModel):
     auto_renew: bool | None = None
     notes: str | None = None
 
-
+    
 class FDResponse(BaseModel):
     model_config = {"from_attributes": True}
 

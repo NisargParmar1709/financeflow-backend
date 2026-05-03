@@ -27,33 +27,32 @@ Cache invalidation happens in expense_service and income_service on mutation.
 """
 
 import uuid
-import calendar
 from decimal import Decimal
-from datetime import date
-from sqlalchemy import select, func, and_, text
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cache.keys import CacheKeys
+from app.cache.redis_client import redis_client
+from app.models.account import Account, FixedDeposit
+from app.models.category import Category
+from app.models.due import Due
+from app.models.enums import DueType, FDStatus
 from app.models.expense import Expense
 from app.models.income import Income
-from app.models.category import Category
-from app.models.account import Account, FixedDeposit
-from app.models.due import Due
-from app.models.budget import Budget
-from app.models.enums import FDStatus, DueType
-from app.cache.redis_client import redis_client
-from app.cache.keys import CacheKeys
 from app.utils.formatting import get_month_range
 from app.utils.logging import get_logger, log_event
 
 logger = get_logger(__name__)
 
 # TTLs (seconds)
-_TTL_1H   = 3600
-_TTL_30M  = 1800
-_TTL_24H  = 86400
+_TTL_1H = 3600
+_TTL_30M = 1800
+_TTL_24H = 86400
 
 
 # ── Dashboard KPIs ─────────────────────────────────────────────────────────────
+
 
 async def get_dashboard_kpis(
     db: AsyncSession,
@@ -69,8 +68,14 @@ async def get_dashboard_kpis(
     cache_key = f"financeflow:analytics:{user_id}:dashboard:{year}:{month:02d}"
     cached = await redis_client.get_json(cache_key)
     if cached:
-        log_event(logger, "dashboard_cache_hit", trace_id=trace_id,
-                  user_id=str(user_id), year=year, month=month)
+        log_event(
+            logger,
+            "dashboard_cache_hit",
+            trace_id=trace_id,
+            user_id=str(user_id),
+            year=year,
+            month=month,
+        )
         return cached
 
     start, end = get_month_range(year, month)
@@ -98,8 +103,7 @@ async def get_dashboard_kpis(
     income_total = Decimal(str(inc_result.scalar()))
     net_savings = income_total - expense_total
     savings_rate = (
-        round(float(net_savings) / float(income_total) * 100, 1)
-        if income_total > 0 else 0.0
+        round(float(net_savings) / float(income_total) * 100, 1) if income_total > 0 else 0.0
     )
 
     # Last month for comparison
@@ -131,7 +135,7 @@ async def get_dashboard_kpis(
     prev_inc_d = Decimal(str(prev_inc or 0))
 
     expense_vs_last = _pct_change(prev_exp_d, expense_total)
-    income_vs_last  = _pct_change(prev_inc_d, income_total)
+    income_vs_last = _pct_change(prev_inc_d, income_total)
 
     # Top spending category this month
     top_cat = await db.execute(
@@ -151,6 +155,7 @@ async def get_dashboard_kpis(
 
     # Budget alerts (at/above threshold)
     from app.services.budget_service import get_alerts_only
+
     budget_alerts = await get_alerts_only(db, user_id)
 
     # Due summary
@@ -160,7 +165,7 @@ async def get_dashboard_kpis(
         .group_by(Due.due_type)
     )
     due_map = {r.due_type: Decimal(str(r[1])) for r in due_rows.all()}
-    i_owe    = due_map.get(DueType.I_OWE, Decimal("0"))
+    i_owe = due_map.get(DueType.I_OWE, Decimal("0"))
     they_owe = due_map.get(DueType.THEY_OWE, Decimal("0"))
 
     result = {
@@ -183,6 +188,7 @@ async def get_dashboard_kpis(
 
 
 # ── Spending by Category ───────────────────────────────────────────────────────
+
 
 async def get_spending_by_category(
     db: AsyncSession,
@@ -229,9 +235,9 @@ async def get_spending_by_category(
             "color": r.color,
             "total_amount": str(r.total),
             "transaction_count": r.count,
-            "pct_of_total": round(
-                float(r.total) / float(grand_total) * 100, 2
-            ) if grand_total > 0 else 0.0,
+            "pct_of_total": round(float(r.total) / float(grand_total) * 100, 2)
+            if grand_total > 0
+            else 0.0,
         }
         for r in all_rows
     ]
@@ -241,6 +247,7 @@ async def get_spending_by_category(
 
 
 # ── Monthly Trend (12-month bar chart) ────────────────────────────────────────
+
 
 async def get_monthly_trend(
     db: AsyncSession,
@@ -283,25 +290,40 @@ async def get_monthly_trend(
     )
     inc_by_month = {int(r.month): Decimal(str(r.total)) for r in inc_rows.all()}
 
-    month_names = ["Jan","Feb","Mar","Apr","May","Jun",
-                   "Jul","Aug","Sep","Oct","Nov","Dec"]
+    month_names = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
     result = []
     for m in range(1, 13):
-        income  = inc_by_month.get(m, Decimal("0"))
+        income = inc_by_month.get(m, Decimal("0"))
         expense = exp_by_month.get(m, Decimal("0"))
-        result.append({
-            "month_number": m,
-            "month_name":   month_names[m - 1],
-            "income":       str(income),
-            "expense":      str(expense),
-            "net_savings":  str(income - expense),
-        })
+        result.append(
+            {
+                "month_number": m,
+                "month_name": month_names[m - 1],
+                "income": str(income),
+                "expense": str(expense),
+                "net_savings": str(income - expense),
+            }
+        )
 
     await redis_client.set_json(cache_key, result, ttl_seconds=_TTL_24H)
     return result
 
 
 # ── Daily Pattern (day-of-week averages) ──────────────────────────────────────
+
 
 async def get_daily_pattern(
     db: AsyncSession,
@@ -334,15 +356,23 @@ async def get_daily_pattern(
         .group_by(func.extract("dow", Expense.expense_date))
     )
     # Remap: Sunday=0 → 7 so Monday=1…Sunday=7
-    day_names = {1:"Monday",2:"Tuesday",3:"Wednesday",4:"Thursday",
-                 5:"Friday",6:"Saturday",7:"Sunday"}
+    day_names = {
+        1: "Monday",
+        2: "Tuesday",
+        3: "Wednesday",
+        4: "Thursday",
+        5: "Friday",
+        6: "Saturday",
+        7: "Sunday",
+    }
     by_dow: dict[int, dict] = {}
     for r in rows.all():
         dow = int(r.dow)
         if dow == 0:
             dow = 7
         total = Decimal(str(r.total))
-        avg = total / r.count if r.count > 0 else Decimal("0")
+        count: int = r.count  # type: ignore[assignment]
+        avg = total / Decimal(str(count)) if count > 0 else Decimal("0")
         by_dow[dow] = {
             "day": dow,
             "day_name": day_names[dow],
@@ -351,10 +381,15 @@ async def get_daily_pattern(
         }
 
     result = [
-        by_dow.get(d, {
-            "day": d, "day_name": day_names[d],
-            "total": "0", "avg": "0",
-        })
+        by_dow.get(
+            d,
+            {
+                "day": d,
+                "day_name": day_names[d],
+                "total": "0",
+                "avg": "0",
+            },
+        )
         for d in range(1, 8)
     ]
 
@@ -363,6 +398,7 @@ async def get_daily_pattern(
 
 
 # ── Payment Mode Split ─────────────────────────────────────────────────────────
+
 
 async def get_payment_mode_split(
     db: AsyncSession,
@@ -400,9 +436,9 @@ async def get_payment_mode_split(
         {
             "payment_mode": r.payment_mode.value,
             "total_amount": str(r.total),
-            "pct_of_total": round(
-                float(r.total) / float(grand_total) * 100, 2
-            ) if grand_total > 0 else 0.0,
+            "pct_of_total": round(float(r.total) / float(grand_total) * 100, 2)
+            if grand_total > 0
+            else 0.0,
         }
         for r in all_rows
     ]
@@ -412,6 +448,7 @@ async def get_payment_mode_split(
 
 
 # ── Yearly Summary ─────────────────────────────────────────────────────────────
+
 
 async def get_yearly_summary(
     db: AsyncSession,
@@ -425,35 +462,39 @@ async def get_yearly_summary(
         return cached
 
     monthly_trend = await get_monthly_trend(db, user_id, year)
-    annual_income  = sum(Decimal(m["income"])  for m in monthly_trend)
+    annual_income = sum(Decimal(m["income"]) for m in monthly_trend)
     annual_expense = sum(Decimal(m["expense"]) for m in monthly_trend)
     annual_savings = annual_income - annual_expense
 
     months_with_data = [m for m in monthly_trend if Decimal(m["expense"]) > 0]
-    avg_monthly = (
-        annual_expense / len(months_with_data)
-        if months_with_data else Decimal("0")
+    avg_monthly: Decimal = (
+        annual_expense / Decimal(str(len(months_with_data))) if months_with_data else Decimal("0")
     )
 
     monthly_breakdown = []
     for m in monthly_trend:
-        income  = Decimal(m["income"])
+        income = Decimal(m["income"])
         expense = Decimal(m["expense"])
         savings = income - expense
-        rate    = round(float(savings) / float(income) * 100, 1) if income > 0 else 0.0
-        monthly_breakdown.append({
-            "month": m["month_number"],
-            "month_name": m["month_name"],
-            "income": str(income),
-            "expense": str(expense),
-            "savings": str(savings),
-            "savings_rate_pct": rate,
-        })
+        rate = round(float(savings) / float(income) * 100, 1) if income > 0 else 0.0
+        monthly_breakdown.append(
+            {
+                "month": m["month_number"],
+                "month_name": m["month_name"],
+                "income": str(income),
+                "expense": str(expense),
+                "savings": str(savings),
+                "savings_rate_pct": rate,
+            }
+        )
 
     # Top categories for the full year
     top_cats = await db.execute(
         select(
-            Category.id, Category.name, Category.icon, Category.color,
+            Category.id,
+            Category.name,
+            Category.icon,
+            Category.color,
             func.sum(Expense.amount).label("total"),
             func.count(Expense.id).label("count"),
         )
@@ -475,9 +516,9 @@ async def get_yearly_summary(
             "color": r.color,
             "total_amount": str(r.total),
             "transaction_count": r.count,
-            "pct_of_total": round(
-                float(r.total) / float(annual_expense) * 100, 2
-            ) if annual_expense > 0 else 0.0,
+            "pct_of_total": round(float(r.total) / float(annual_expense) * 100, 2)
+            if annual_expense > 0
+            else 0.0,
         }
         for r in top_cats.all()
     ]
@@ -497,6 +538,7 @@ async def get_yearly_summary(
 
 
 # ── Net Worth ──────────────────────────────────────────────────────────────────
+
 
 async def get_net_worth(
     db: AsyncSession,
@@ -531,11 +573,11 @@ async def get_net_worth(
     )
     due_map = {r.due_type: Decimal(str(r[1])) for r in due_rows.all()}
     dues_receivable = due_map.get(DueType.THEY_OWE, Decimal("0"))
-    dues_payable    = due_map.get(DueType.I_OWE,    Decimal("0"))
+    dues_payable = due_map.get(DueType.I_OWE, Decimal("0"))
 
     acc_total_d = Decimal(str(acc_total or 0))
-    fd_total_d  = Decimal(str(fd_total or 0))
-    net_worth   = acc_total_d + fd_total_d + dues_receivable - dues_payable
+    fd_total_d = Decimal(str(fd_total or 0))
+    net_worth = acc_total_d + fd_total_d + dues_receivable - dues_payable
 
     result = {
         "account_balances_total": str(acc_total_d),
@@ -550,6 +592,7 @@ async def get_net_worth(
 
 
 # ── Income Source Breakdown ────────────────────────────────────────────────────
+
 
 async def get_income_source_breakdown(
     db: AsyncSession,
@@ -587,9 +630,9 @@ async def get_income_source_breakdown(
         {
             "source": r.source.value,
             "total_amount": str(r.total),
-            "pct_of_total": round(
-                float(r.total) / float(grand_total) * 100, 2
-            ) if grand_total > 0 else 0.0,
+            "pct_of_total": round(float(r.total) / float(grand_total) * 100, 2)
+            if grand_total > 0
+            else 0.0,
         }
         for r in all_rows
     ]
@@ -599,6 +642,7 @@ async def get_income_source_breakdown(
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
+
 
 def _pct_change(old: Decimal, new: Decimal) -> float:
     """

@@ -2,25 +2,12 @@
 app/services/income_service.py — Income Service
 
 RESPONSIBILITIES:
-  create_income         — insert income row and invalidate related caches
-  list_incomes          — filtered, paginated income listing
-  get_income            — fetch one income with ownership validation
-  update_income         — partial update + cache refresh
-  delete_income         — soft delete + Cloudinary screenshot cleanup
-  get_income_summary    — monthly income breakdown by source (cached)
-
-CACHE PATTERN:
-  Monthly income summary uses cache-aside:
-    1. Build cache key
-    2. Try Redis GET → return if hit
-    3. Query PostgreSQL → compute result
-    4. SET in Redis with TTL
-    5. Return result
-
-  Cache invalidation happens after create/update/delete so data stays fresh.
-  Monetary values are returned as strings to preserve Decimal precision.
-
-ALL FUNCTIONS ARE READ-ONLY EXCEPT CREATE / UPDATE / DELETE.
+  create_income — insert income row, invalidate caches
+  list_incomes  — filtered paginated list
+  get_income    — single income with ownership check
+  update_income — partial update
+  delete_income — soft delete + Cloudinary screenshot cleanup
+  get_summary   — monthly income breakdown by source (cached)
 """
 
 import uuid
@@ -42,10 +29,6 @@ from app.utils.logging import get_logger, log_event
 
 logger = get_logger(__name__)
 
-
-# ── Create Income ──────────────────────────────────────────────────────────────
-# Inserts a new income record, commits it, refreshes the ORM object,
-# then invalidates monthly and analytics caches for the affected period.
 
 async def create_income(
     db: AsyncSession,
@@ -85,9 +68,6 @@ async def create_income(
     )
     return income
 
-# ── List Incomes ───────────────────────────────────────────────────────────────
-# Builds a dynamic filter set, applies pagination, and returns
-# both rows and total count for UI pagination metadata.
 
 async def list_incomes(
     db: AsyncSession,
@@ -125,9 +105,6 @@ async def list_incomes(
     return list(rows.scalars().all()), total or 0
 
 
-# ── Get Single Income ─────────────────────────────────────────────────────────
-# Loads the record, ensures it exists, then verifies ownership.
-
 async def get_income(
     db: AsyncSession,
     income_id: uuid.UUID,
@@ -143,10 +120,6 @@ async def get_income(
         raise UnauthorizedAccessException()
     return income
 
-
-# ── Update Income ──────────────────────────────────────────────────────────────
-# Applies partial updates field-by-field, commits, refreshes,
-# and clears old/new month cache entries if the date changed.
 
 async def update_income(
     db: AsyncSession,
@@ -192,10 +165,6 @@ async def update_income(
     return income
 
 
-# ── Delete Income ──────────────────────────────────────────────────────────────
-# Soft deletes the income, removes Cloudinary asset if present,
-# then invalidates all affected caches.
-
 async def delete_income(
     db: AsyncSession,
     income_id: uuid.UUID,
@@ -223,8 +192,6 @@ async def delete_income(
         logger, "income_deleted", trace_id=trace_id, user_id=str(user_id), income_id=str(income_id)
     )
 
-# ── Monthly Income Summary ─────────────────────────────────────────────────────
-# Cached aggregation grouped by income source for dashboard and charts.
 
 async def get_income_summary(
     db: AsyncSession,
@@ -281,9 +248,6 @@ async def get_income_summary(
     await redis_client.set_json(cache_key, result, ttl_seconds=TTL_MONTHLY_SUMMARY)
     return result
 
-
-# ── Cache Invalidation ─────────────────────────────────────────────────────────
-# Removes monthly summary, analytics cache, and any filtered list cache keys.
 
 async def _invalidate_income_caches(user_id: str, year: int, month: int) -> None:
     await redis_client.delete(

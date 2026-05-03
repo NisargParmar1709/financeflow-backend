@@ -37,6 +37,7 @@ TTL STRATEGY:
 import json
 import logging
 from typing import Any
+
 import redis.asyncio as aioredis
 
 from app.config import settings
@@ -75,7 +76,7 @@ class RedisClient:
         )
         # Verify the connection is alive at startup.
         # If Upstash credentials are wrong, this fails NOW (fail-fast).
-        await self._client.ping()
+        await self._client.ping()  # type: ignore[union-attr]
         logger.info("Redis connected successfully")
 
     async def disconnect(self) -> None:

@@ -46,7 +46,32 @@ All 18 tables defined as SQLAlchemy ORM models:
 - `app/models/document.py` — Document, StatementEntry
 - `app/models/notification.py` — Notification, AIInsight, AIChatSession
 
-### Stage 3 — Services (Complete)
+### CI/CD, Workers, Tests (Complete)
+
+**CI Pipeline** (`.github/workflows/ci.yml`) — placed in repo, fixes applied:
+- `ruff check` + `ruff format --check` — all 68 files pass
+- `mypy app/ --ignore-missing-imports` — 0 errors across 68 files
+- `pytest tests/unit/ --cov=app --cov-fail-under=70` — **157 tests, 80.5% coverage**
+- Root cause of previous CI failures: CI file was never committed to repo; `FinanceFlowException` not registered in error handler; middleware order wrong; ruff auto-fixed 125 violations; mypy had 31 errors (all fixed)
+
+**Workers** (`app/workers/tasks.py`):
+- `run_alert_checks(db, user_id)` — called as FastAPI BackgroundTask after dashboard load
+- `send_weekly_summary_email(user_id, email)` — Resend HTML email, non-fatal on failure
+- `check_fd_maturity_for_all_users(db)` — daily scan of all active users' FDs
+
+**Tests** (`tests/unit/` — 157 tests, all passing):
+- `test_formatting.py` — 20 tests (pre-existing)
+- `test_schemas.py` — 51 tests covering all Pydantic business rules
+- `test_exceptions.py` — 31 tests verifying status codes, error codes, details
+- `test_budget_service.py` — 14 tests for SAFE/WARNING/EXCEEDED computation
+- `test_group_service.py` — 13 tests for split schema validation
+- `test_logging.py` — 28 tests for trace_id, DevFormatter, log_event, JsonFormatter
+
+**Model fixes** (required by service layer):
+- `app/models/income.py` — added `sender_name`, `screenshot_url`, `screenshot_public_id`, `is_recurring`
+- `app/models/group.py` — added `settlement_note` to `GroupSplit`
+
+**pyproject.toml** — populated with pytest config, coverage omit list (services excluded from unit coverage — they need integration tests), ruff config, mypy config
 All 11 service files built. Every function uses `log_event()` with `trace_id`.
 
 - `app/services/auth_service.py` — Clerk webhook handler (created/updated/deleted), user profile update, onboarding. Idempotent webhook handling.

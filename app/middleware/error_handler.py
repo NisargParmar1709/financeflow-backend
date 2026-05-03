@@ -39,9 +39,10 @@ SECURITY (Video 20 — Backend Security):
 
 import logging
 import traceback
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.responses import JSONResponse
+
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.config import settings
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Helper: extract trace_id safely ───────────────────────────────────────────
+
 
 def _trace_id(request: Request) -> str:
     """
@@ -63,6 +65,7 @@ def _trace_id(request: Request) -> str:
 
 
 # ── Standard Error Response Builder ───────────────────────────────────────────
+
 
 def error_response(
     status_code: int,
@@ -91,6 +94,7 @@ def error_response(
 
 
 # ── Exception Handlers ─────────────────────────────────────────────────────────
+
 
 async def financeflow_exception_handler(
     request: Request, exc: FinanceFlowException
@@ -195,9 +199,7 @@ async def validation_exception_handler(
     )
 
 
-async def integrity_error_handler(
-    request: Request, exc: IntegrityError
-) -> JSONResponse:
+async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
     """
     Handles database constraint violations.
 
@@ -236,9 +238,7 @@ async def integrity_error_handler(
     )
 
 
-async def operational_error_handler(
-    request: Request, exc: OperationalError
-) -> JSONResponse:
+async def operational_error_handler(request: Request, exc: OperationalError) -> JSONResponse:
     """
     Handles database connection/operational failures.
     Example: DB server unreachable, connection pool exhausted.
@@ -261,9 +261,7 @@ async def operational_error_handler(
     )
 
 
-async def unhandled_exception_handler(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     The final safety net — catches EVERYTHING that fell through.
 
@@ -295,6 +293,7 @@ async def unhandled_exception_handler(
 
 # ── Registration ───────────────────────────────────────────────────────────────
 
+
 def register_exception_handlers(app: FastAPI) -> None:
     """
     Registers all exception handlers with the FastAPI app.
@@ -308,15 +307,16 @@ def register_exception_handlers(app: FastAPI) -> None:
       5. OperationalError     → DB connection failures
       6. Exception            → catch-all safety net (least specific, last)
     """
-    app.add_exception_handler(FinanceFlowException, financeflow_exception_handler)
-    app.add_exception_handler(HTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    app.add_exception_handler(IntegrityError, integrity_error_handler)
-    app.add_exception_handler(OperationalError, operational_error_handler)
+    app.add_exception_handler(FinanceFlowException, financeflow_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(IntegrityError, integrity_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(OperationalError, operational_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, unhandled_exception_handler)
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
+
 
 def _status_code_to_error_code(status_code: int) -> str:
     """Maps HTTP status codes to machine-readable error code strings."""
